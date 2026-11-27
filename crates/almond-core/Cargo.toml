@@ -12,8 +12,13 @@ ffi = ["dep:uniffi"]
 
 [dependencies]
 fsrs.workspace = true
+jiff.workspace = true
 ulid.workspace = true
 uniffi = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Tests look up real zones; the app gets its zone from the shell instead.
+jiff = { workspace = true, features = ["tzdb-bundle-always"] }

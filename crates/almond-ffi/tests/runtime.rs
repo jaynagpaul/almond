@@ -31,7 +31,7 @@ fn temp_db(name: &str) -> String {
 fn a_card_added_today_is_reviewed_and_remembered_across_launches() {
     let db = temp_db("launches");
     let shell = Arc::new(FakeShell::default());
-    let core = Core::new(&db, shell.clone()).unwrap();
+    let core = Core::new(&db, "Asia/Kolkata", shell.clone()).unwrap();
     core.flush();
     assert_eq!(core.view(), ViewModel::Home { due: 0 });
 
@@ -67,7 +67,7 @@ fn a_card_added_today_is_reviewed_and_remembered_across_launches() {
     drop(core);
 
     // Relaunch: the card was rated Good, so it is not due again today.
-    let core = Core::new(&db, Arc::new(FakeShell::default())).unwrap();
+    let core = Core::new(&db, "Asia/Kolkata", Arc::new(FakeShell::default())).unwrap();
     core.flush();
     assert_eq!(core.view(), ViewModel::Home { due: 0 });
 }
@@ -75,7 +75,7 @@ fn a_card_added_today_is_reviewed_and_remembered_across_launches() {
 #[test]
 fn an_undone_review_leaves_the_card_due_after_relaunch() {
     let db = temp_db("undo");
-    let core = Core::new(&db, Arc::new(FakeShell::default())).unwrap();
+    let core = Core::new(&db, "Asia/Kolkata", Arc::new(FakeShell::default())).unwrap();
     core.flush();
     core.dispatch(Event::AddCard {
         front: "perro".into(),
@@ -90,20 +90,24 @@ fn an_undone_review_leaves_the_card_due_after_relaunch() {
     core.flush();
     drop(core);
 
-    let core = Core::new(&db, Arc::new(FakeShell::default())).unwrap();
+    let core = Core::new(&db, "Asia/Kolkata", Arc::new(FakeShell::default())).unwrap();
     core.flush();
     assert_eq!(core.view(), ViewModel::Home { due: 1 });
 }
 
 #[test]
 fn a_bad_path_is_an_error_not_a_crash() {
-    let result = Core::new("/nonexistent/dir/almond.db", Arc::new(FakeShell::default()));
+    let result = Core::new(
+        "/nonexistent/dir/almond.db",
+        "UTC",
+        Arc::new(FakeShell::default()),
+    );
     assert!(result.is_err());
 }
 
 #[test]
 fn a_card_added_while_loading_still_shows_up() {
-    let core = Core::new(&temp_db("loading"), Arc::new(FakeShell::default())).unwrap();
+    let core = Core::new(&temp_db("loading"), "UTC", Arc::new(FakeShell::default())).unwrap();
     // No flush: the first load may still be in flight.
     core.dispatch(Event::AddCard {
         front: "uno".into(),
@@ -111,4 +115,13 @@ fn a_card_added_while_loading_still_shows_up() {
     });
     core.flush();
     assert_eq!(core.view(), ViewModel::Home { due: 1 });
+}
+
+#[test]
+fn an_unknown_time_zone_is_an_error() {
+    let db = temp_db("tz");
+    assert!(Core::new(&db, "Mars/Olympus_Mons", Arc::new(FakeShell::default())).is_err());
+    let core = Core::new(&db, "UTC", Arc::new(FakeShell::default())).unwrap();
+    assert!(core.set_time_zone("Nowhere/Nope").is_err());
+    assert!(core.set_time_zone("Europe/Paris").is_ok());
 }

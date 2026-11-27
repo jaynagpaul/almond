@@ -17,6 +17,8 @@ path = "src/bin/uniffi-bindgen.rs"
 [dependencies]
 almond-core = { workspace = true, features = ["ffi"] }
 almond-store.workspace = true
+# Bundles the time zone database so iOS needs no system copy.
+jiff = { workspace = true, features = ["tzdb-bundle-always"] }
 thiserror.workspace = true
 uniffi = { workspace = true, features = ["cli"] }
 

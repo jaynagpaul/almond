@@ -4,7 +4,7 @@ use almond_store::Store;
 const DAY: i64 = 86_400_000;
 
 fn at(day: i64) -> Timestamp {
-    Timestamp::from_millis(1_800_000_000_000 + day * DAY)
+    Timestamp::from_millisecond(1_800_000_000_000 + day * DAY).unwrap()
 }
 
 fn new_card(store: &mut Store, n: u128, front: &str) -> CardId {
@@ -48,7 +48,7 @@ fn review(
 fn due_fronts(store: &mut Store, day: i64) -> Vec<String> {
     match store
         .apply(DbCmd::LoadDue {
-            now: at(day),
+            due_by: at(day),
             limit: 100,
         })
         .unwrap()
@@ -75,7 +75,7 @@ fn a_reviewed_card_leaves_the_queue_until_it_is_due() {
 
     assert!(due_fronts(&mut store, 0).is_empty());
     let due = store.state(card).unwrap().unwrap().due;
-    let due_day = (due.as_millis() - at(0).as_millis()) / DAY + 1;
+    let due_day = (due.as_millisecond() - at(0).as_millisecond()) / DAY + 1;
     assert_eq!(due_fronts(&mut store, due_day), ["q"]);
 }
 

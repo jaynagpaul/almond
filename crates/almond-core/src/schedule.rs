@@ -3,7 +3,8 @@ use fsrs::{FSRS, ItemState, NextStates};
 pub use fsrs::MemoryState;
 
 use crate::card::{Rating, Review};
-use crate::time::Timestamp;
+use crate::time::{days_between, plus_days};
+use jiff::Timestamp;
 
 /// What the scheduler knows about a card after its latest review.
 ///
@@ -87,7 +88,7 @@ impl Scheduler {
         CardState {
             memory: item.memory,
             last_review: at,
-            due: at.plus_days(item.interval),
+            due: plus_days(at, item.interval),
         }
     }
 
@@ -115,7 +116,7 @@ impl Scheduler {
     }
 
     fn next_states(&self, prev: Option<&CardState>, at: Timestamp) -> NextStates {
-        let elapsed = prev.map_or(0.0, |p| at.days_since(p.last_review));
+        let elapsed = prev.map_or(0.0, |p| days_between(at, p.last_review));
         self.fsrs
             .next_states_with_elapsed_days(prev.map(|p| p.memory), self.retention, elapsed)
             .expect("FSRS steps are finite for parameters accepted by Scheduler::new")

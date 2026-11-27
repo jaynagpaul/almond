@@ -3,7 +3,8 @@ use std::mem;
 use crate::card::{Card, CardId, Rating, Review, ReviewId};
 use crate::schedule::{CardState, Scheduler};
 use crate::session::{Due, Phase, Session, Undo};
-use crate::time::Timestamp;
+use crate::time::{end_of_day, millis_between};
+use jiff::{Timestamp, tz::TimeZone};
 
 /// How many cards one session loads.
 const SESSION_LIMIT: u32 = 500;
@@ -44,9 +45,11 @@ impl From<Event> for Msg {
 }
 
 /// The world as `update` sees it. The runtime fills it in; tests pick values.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Env {
     pub now: Timestamp,
+    /// The user's time zone, for where their study day starts and ends.
+    pub tz: TimeZone,
     /// Random bits for minting ids.
     pub entropy: u128,
 }
@@ -63,9 +66,9 @@ pub enum Cmd {
 /// Storage work. Every write is idempotent, keyed by id.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DbCmd {
-    /// Answers with [`Msg::DueLoaded`].
+    /// Cards due before `due_by`. Answers with [`Msg::DueLoaded`].
     LoadDue {
-        now: Timestamp,
+        due_by: Timestamp,
         limit: u32,
     },
     InsertCard(Card),
@@ -130,7 +133,7 @@ impl Model {
 
 /// The whole app's behavior. Pure: given the same model, message and env, it
 /// always makes the same changes and returns the same commands.
-pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
+pub fn update(model: &mut Model, msg: Msg, env: &Env) -> Vec<Cmd> {
     let now = env.now;
     match (msg, &mut model.screen) {
         // Coming back to the foreground mid-review keeps the session.
@@ -140,7 +143,7 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
             model.screen = Screen::Loading;
             vec![
                 Cmd::Db(DbCmd::LoadDue {
-                    now,
+                    due_by: end_of_day(now, &env.tz),
                     limit: SESSION_LIMIT,
                 }),
                 Cmd::Render,
@@ -184,7 +187,7 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
                 // The load in flight may miss the new card; queue another
                 // behind the insert.
                 Screen::Loading | Screen::Failed { .. } => cmds.push(Cmd::Db(DbCmd::LoadDue {
-                    now,
+                    due_by: end_of_day(now, &env.tz),
                     limit: SESSION_LIMIT,
                 })),
             }
@@ -234,7 +237,7 @@ fn reveal(session: &mut Session, scheduler: &Scheduler, now: Timestamp) -> Vec<C
     ]
 }
 
-fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: Env) -> Vec<Cmd> {
+fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: &Env) -> Vec<Cmd> {
     let now = env.now;
     let Phase::Back {
         current,
@@ -249,7 +252,7 @@ fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: Env) 
         card: current.card.id,
         at: now,
         rating,
-        took_ms: now.millis_since(shown_at),
+        took_ms: millis_between(now, shown_at),
     };
     // Computed from the review itself, not the preview, so the cache always
     // equals a fold over the log.

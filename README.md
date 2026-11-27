@@ -11,7 +11,7 @@ update(&mut Model, Msg, Env) -> Vec<Cmd>
 view(&Model) -> ViewModel
 ```
 
-- **Pure core.** `update` never reads a clock, rolls dice, or does I/O. Time and entropy come in through `Env`; side effects go out as `Cmd` values. Tests drive it with plain data.
+- **Pure core.** `update` never reads a clock, rolls dice, or does I/O. The time ([jiff](https://docs.rs/jiff) `Timestamp`), the user's time zone and entropy come in through `Env`; side effects go out as `Cmd` values. Tests drive it with plain data. The study day ends at 4 AM local time.
 - **The review log is the truth.** Every review is an immutable, idempotent row. A card's schedule (FSRS-7, via the [`fsrs`](https://crates.io/crates/fsrs) crate) is a fold over its reviews, cached in `card_state` so reads never replay the log.
 - **Sessions are state machines.** A card can only be rated after it is revealed, and undo is a value.
 - **Thin shell.** Swift sends `Event`s, draws the `ViewModel`, and performs the few `PlatformCmd`s only it can (haptics today). It makes no decisions.

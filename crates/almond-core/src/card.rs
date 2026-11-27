@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use ulid::Ulid;
 
-use crate::time::Timestamp;
+use jiff::Timestamp;
 
 /// A typed id: an `Id<Card>` can never be passed where an `Id<Review>` is
 /// expected, though both are the same 16 bytes underneath.
@@ -25,7 +25,7 @@ pub type ReviewId = Id<Review>;
 
 impl<T> Id<T> {
     pub fn new(at: Timestamp, entropy: u128) -> Self {
-        Self::from_ulid(Ulid::from_parts(at.as_millis() as u64, entropy))
+        Self::from_ulid(Ulid::from_parts(at.as_millisecond().max(0) as u64, entropy))
     }
 
     /// 16 bytes, big-endian, so byte order matches creation order.
