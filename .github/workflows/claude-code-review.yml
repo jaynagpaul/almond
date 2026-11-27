@@ -2,7 +2,7 @@ name: Claude Code Review
 
 # Reviews every non-draft pull request against CLAUDE.md.
 # Needs the ANTHROPIC_API_KEY repository secret.
-# Pull requests from forks are skipped by the action (allow_fork_prs is off).
+# Pull requests from forks get no secrets, so the job skips them.
 
 on:
   pull_request:
@@ -10,11 +10,11 @@ on:
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -24,9 +24,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           use_sticky_comment: true

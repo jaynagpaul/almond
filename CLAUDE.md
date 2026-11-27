@@ -11,7 +11,7 @@ A general-use flashcard app for macOS and iOS. The product goal is an app that f
 
 ## Checks
 
-Before you call a change done, run what CI runs and read the output:
+Before you call a change done, run the same checks as `.github/workflows/ci.yml` and read the output:
 
 ```sh
 cargo fmt --all --check
