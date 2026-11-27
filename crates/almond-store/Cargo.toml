@@ -1,0 +1,14 @@
+[package]
+name = "almond-store"
+version = "0.1.0"
+description = "Almond's SQLite storage: the review log and the cached card schedule."
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+almond-core.workspace = true
+rusqlite.workspace = true
+
+[lints]
+workspace = true
