@@ -11,6 +11,7 @@ rust-version = "1.88"
 almond-core = { path = "crates/almond-core" }
 almond-store = { path = "crates/almond-store" }
 fsrs = "7.0"
+jiff = { version = "1.0", default-features = false, features = ["std"] }
 rusqlite = { version = "0.43", features = ["bundled"] }
 ulid = { version = "3", default-features = false }
 uniffi = "0.33"

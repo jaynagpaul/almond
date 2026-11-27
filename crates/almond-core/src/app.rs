@@ -3,7 +3,8 @@ use std::mem;
 use crate::card::{Card, CardId, Rating, Review, ReviewId};
 use crate::schedule::{CardState, Scheduler};
 use crate::session::{Due, Phase, Session, Undo};
-use crate::time::Timestamp;
+use crate::time::{end_of_day, millis_between, to_millis};
+use jiff::{Timestamp, tz::TimeZone};
 
 /// How many cards one session loads.
 const SESSION_LIMIT: u32 = 500;
@@ -44,9 +45,11 @@ impl From<Event> for Msg {
 }
 
 /// The world as `update` sees it. The runtime fills it in; tests pick values.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Env {
     pub now: Timestamp,
+    /// The user's time zone, for where their study day starts and ends.
+    pub tz: TimeZone,
     /// Random bits for minting ids.
     pub entropy: u128,
 }
@@ -63,9 +66,12 @@ pub enum Cmd {
 /// Storage work. Every write is idempotent, keyed by id.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DbCmd {
-    /// Answers with [`Msg::DueLoaded`].
+    /// Cards due by `now`, plus cards with intervals of a day or more due
+    /// before `day_end`, so long reviews can be done any time that day while
+    /// short learning steps wait their turn. Answers with [`Msg::DueLoaded`].
     LoadDue {
         now: Timestamp,
+        day_end: Timestamp,
         limit: u32,
     },
     InsertCard(Card),
@@ -130,8 +136,10 @@ impl Model {
 
 /// The whole app's behavior. Pure: given the same model, message and env, it
 /// always makes the same changes and returns the same commands.
-pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
-    let now = env.now;
+pub fn update(model: &mut Model, msg: Msg, env: &Env) -> Vec<Cmd> {
+    // The log stores milliseconds; work at that precision so the cached
+    // state always equals a fold over what was stored.
+    let now = to_millis(env.now);
     match (msg, &mut model.screen) {
         // Coming back to the foreground mid-review keeps the session.
         (Msg::Event(Event::Opened), Screen::Review(_)) => vec![],
@@ -141,6 +149,7 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
             vec![
                 Cmd::Db(DbCmd::LoadDue {
                     now,
+                    day_end: end_of_day(now, &env.tz),
                     limit: SESSION_LIMIT,
                 }),
                 Cmd::Render,
@@ -185,6 +194,7 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
                 // behind the insert.
                 Screen::Loading | Screen::Failed { .. } => cmds.push(Cmd::Db(DbCmd::LoadDue {
                     now,
+                    day_end: end_of_day(now, &env.tz),
                     limit: SESSION_LIMIT,
                 })),
             }
@@ -205,7 +215,7 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
         (Msg::Event(Event::Rate { rating }), Screen::Review(session))
             if matches!(session.phase, Phase::Back { .. }) =>
         {
-            rate(session, &model.scheduler, rating, env)
+            rate(session, &model.scheduler, rating, now, env.entropy)
         }
 
         (Msg::Event(Event::Undo), Screen::Review(session)) => undo(session, now),
@@ -234,8 +244,13 @@ fn reveal(session: &mut Session, scheduler: &Scheduler, now: Timestamp) -> Vec<C
     ]
 }
 
-fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: Env) -> Vec<Cmd> {
-    let now = env.now;
+fn rate(
+    session: &mut Session,
+    scheduler: &Scheduler,
+    rating: Rating,
+    now: Timestamp,
+    entropy: u128,
+) -> Vec<Cmd> {
     let Phase::Back {
         current,
         shown_at,
@@ -245,11 +260,11 @@ fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: Env) 
         unreachable!("update only calls rate from Back")
     };
     let review = Review {
-        id: ReviewId::new(now, env.entropy),
+        id: ReviewId::new(now, entropy),
         card: current.card.id,
         at: now,
         rating,
-        took_ms: now.millis_since(shown_at),
+        took_ms: millis_between(now, shown_at),
     };
     // Computed from the review itself, not the preview, so the cache always
     // equals a fold over the log.

@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::temp_dir().join("almond-replay.db");
     let _ = std::fs::remove_file(&path);
     let mut store = Store::open(&path)?;
-    let start = Timestamp::from_millis(1_700_000_000_000);
+    let start = Timestamp::from_millisecond(1_700_000_000_000)?;
     let ratings = [
         Rating::Good,
         Rating::Good,
@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut state = None;
         for i in 0..REVIEWS_PER_CARD {
             n += 1;
-            let at = Timestamp::from_millis(start.as_millis() + i * DAY / 3);
+            let at = Timestamp::from_millisecond(start.as_millisecond() + i * DAY / 3)?;
             let rating = ratings[(n % ratings.len() as u128) as usize];
             let step = Instant::now();
             let next = s.advance(state.as_ref(), rating, at);
@@ -69,7 +69,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let t = Instant::now();
-    let due = store.due(Timestamp::from_millis(start.as_millis() + 400 * DAY), 500)?;
+    let late = Timestamp::from_millisecond(start.as_millisecond() + 400 * DAY)?;
+    let due = store.due(late, late, 500)?;
     println!("load {} due cards: {:.2?}", due.len(), t.elapsed());
 
     let t = Instant::now();

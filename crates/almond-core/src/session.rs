@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::card::{Card, ReviewId};
 use crate::schedule::{CardState, Preview};
-use crate::time::Timestamp;
+use jiff::Timestamp;
 
 /// A card waiting to be reviewed, with its cached schedule (`None` if new).
 #[derive(Debug, Clone, PartialEq)]

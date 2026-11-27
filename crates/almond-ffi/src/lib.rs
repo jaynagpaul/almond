@@ -9,12 +9,11 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use almond_core::{
-    Cmd, DbCmd, Env, Event, Model, Msg, PlatformCmd, Timestamp, ViewModel, update, view,
+    Cmd, DbCmd, Env, Event, Model, Msg, PlatformCmd, TimeZone, Timestamp, ViewModel, update, view,
 };
 use almond_store::Store;
 
@@ -43,6 +42,7 @@ struct Inner {
     model: Mutex<Model>,
     db: Sender<Job>,
     shell: Arc<dyn Shell>,
+    tz: RwLock<TimeZone>,
     ids: AtomicU64,
     seed: RandomState,
 }
@@ -55,11 +55,18 @@ enum Job {
 #[uniffi::export]
 impl Core {
     /// Opens (or creates) the database at `db_path` and loads the due queue.
+    /// `time_zone` is an IANA name such as `Asia/Kolkata`
+    /// (`TimeZone.current.identifier` in Swift).
     ///
     /// # Errors
-    /// If the database cannot be opened.
+    /// If the database cannot be opened. An unknown time zone falls back to UTC.
     #[uniffi::constructor]
-    pub fn new(db_path: &str, shell: Arc<dyn Shell>) -> Result<Arc<Self>, CoreError> {
+    pub fn new(
+        db_path: &str,
+        time_zone: &str,
+        shell: Arc<dyn Shell>,
+    ) -> Result<Arc<Self>, CoreError> {
+        let tz = time_zone_named(time_zone);
         let store = Store::open(db_path).map_err(|e| CoreError::Storage {
             message: e.to_string(),
         })?;
@@ -74,6 +81,7 @@ impl Core {
                 model: Mutex::new(Model::default()),
                 db: tx,
                 shell,
+                tz: RwLock::new(tz),
                 ids: AtomicU64::new(0),
                 seed: RandomState::new(),
             }
@@ -89,6 +97,18 @@ impl Core {
 
     pub fn view(&self) -> ViewModel {
         view(&self.inner.model())
+    }
+
+    /// Call when the system time zone changes. It applies from the next load
+    /// of due cards: sending `Opened` from Home reloads now, while a review
+    /// session in progress keeps its cards until it closes.
+    pub fn set_time_zone(&self, time_zone: &str) {
+        let tz = time_zone_named(time_zone);
+        *self
+            .inner
+            .tz
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = tz;
     }
 }
 
@@ -112,10 +132,15 @@ impl Inner {
 
     fn send(&self, msg: Msg) {
         let env = Env {
-            now: now(),
+            now: Timestamp::now(),
+            tz: self
+                .tz
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
             entropy: self.entropy(),
         };
-        let cmds = update(&mut self.model(), msg, env);
+        let cmds = update(&mut self.model(), msg, &env);
         for cmd in cmds {
             match cmd {
                 Cmd::Render => self.shell.changed(),
@@ -166,9 +191,11 @@ fn worker(mut store: Store, jobs: &Receiver<Job>, core: &Weak<Inner>) {
     }
 }
 
-fn now() -> Timestamp {
-    let ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64);
-    Timestamp::from_millis(ms)
+/// Never fails: a zone missing from the bundled database (newer than it, or
+/// a custom name) must not stop the app from opening.
+fn time_zone_named(name: &str) -> TimeZone {
+    TimeZone::get(name).unwrap_or_else(|e| {
+        eprintln!("almond: unknown time zone {name:?} ({e}); using UTC");
+        TimeZone::UTC
+    })
 }

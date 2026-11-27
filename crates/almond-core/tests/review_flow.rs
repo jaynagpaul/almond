@@ -3,7 +3,7 @@
 
 use almond_core::{
     Card, CardId, Cmd, DbCmd, Due, Env, Event, Haptic, Model, Msg, PlatformCmd, Rating, Scheduler,
-    Timestamp, ViewModel, update, view,
+    TimeZone, Timestamp, ViewModel, update, view,
 };
 
 const DAY: i64 = 86_400_000;
@@ -18,7 +18,7 @@ impl App {
     fn with_cards(cards: &[(&str, &str)]) -> Self {
         let mut app = App {
             model: Model::default(),
-            now: Timestamp::from_millis(1_800_000_000_000),
+            now: Timestamp::from_millisecond(1_800_000_000_000).unwrap(),
             entropy: 0,
         };
         app.send(Event::Opened);
@@ -47,15 +47,16 @@ impl App {
         update(
             &mut self.model,
             msg,
-            Env {
+            &Env {
                 now: self.now,
+                tz: TimeZone::UTC,
                 entropy: self.entropy,
             },
         )
     }
 
     fn wait_ms(&mut self, ms: i64) {
-        self.now = Timestamp::from_millis(self.now.as_millis() + ms);
+        self.now = Timestamp::from_millisecond(self.now.as_millisecond() + ms).unwrap();
     }
 
     fn view(&self) -> ViewModel {
@@ -80,14 +81,23 @@ fn recorded(cmds: &[Cmd]) -> Vec<&almond_core::Review> {
 }
 
 #[test]
-fn opening_loads_due_cards_then_shows_home() {
+fn opening_loads_cards_due_by_the_end_of_the_local_day_then_shows_home() {
     let mut model = Model::default();
-    let now = Timestamp::from_millis(1_000);
-    let cmds = update(&mut model, Event::Opened.into(), Env { now, entropy: 0 });
+    let env = Env {
+        // 1:48 AM in Kolkata: the study day runs until 4 AM local.
+        now: "2026-11-27T20:18:00Z".parse().unwrap(),
+        tz: TimeZone::get("Asia/Kolkata").unwrap(),
+        entropy: 0,
+    };
+    let cmds = update(&mut model, Event::Opened.into(), &env);
     assert_eq!(view(&model), ViewModel::Loading);
-    assert!(cmds.contains(&Cmd::Db(DbCmd::LoadDue { now, limit: 500 })));
+    assert!(cmds.contains(&Cmd::Db(DbCmd::LoadDue {
+        now: env.now,
+        day_end: "2026-11-27T22:30:00Z".parse().unwrap(),
+        limit: 500
+    })));
 
-    update(&mut model, Msg::DueLoaded(vec![]), Env { now, entropy: 0 });
+    update(&mut model, Msg::DueLoaded(vec![]), &env);
     assert_eq!(view(&model), ViewModel::Home { due: 0 });
 }
 
@@ -264,7 +274,7 @@ fn the_cached_state_always_equals_a_fold_over_the_log() {
 #[test]
 fn scheduling_is_deterministic() {
     let s = Scheduler::default();
-    let at = Timestamp::from_millis(0);
+    let at = Timestamp::UNIX_EPOCH;
     let a = s.advance(None, Rating::Good, at);
     let b = s.advance(None, Rating::Good, at);
     assert_eq!(a, b);
@@ -348,21 +358,41 @@ fn a_card_added_on_the_done_screen_is_shown_next() {
 fn a_failed_load_shows_an_error_and_opening_again_retries() {
     let mut model = Model::default();
     let env = Env {
-        now: Timestamp::from_millis(0),
+        now: Timestamp::UNIX_EPOCH,
+        tz: TimeZone::UTC,
         entropy: 0,
     };
-    update(&mut model, Event::Opened.into(), env);
-    update(&mut model, Msg::LoadFailed("disk full".into()), env);
+    update(&mut model, Event::Opened.into(), &env);
+    update(&mut model, Msg::LoadFailed("disk full".into()), &env);
     assert_eq!(
         view(&model),
         ViewModel::Failed {
             message: "disk full".into()
         }
     );
-    let cmds = update(&mut model, Event::Opened.into(), env);
+    let cmds = update(&mut model, Event::Opened.into(), &env);
     assert!(
         cmds.iter()
             .any(|c| matches!(c, Cmd::Db(DbCmd::LoadDue { .. })))
     );
     assert_eq!(view(&model), ViewModel::Loading);
+}
+
+#[test]
+fn review_times_are_kept_to_the_millisecond_the_log_stores() {
+    let mut app = App::with_cards(&[("q", "a")]);
+    app.now = "2026-11-27T12:00:00.123456789Z".parse().unwrap();
+    app.send(Event::StartReview);
+    app.send(Event::Reveal);
+    let cmds = app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    let review = recorded(&cmds)[0];
+    let stored: Timestamp = "2026-11-27T12:00:00.123Z".parse().unwrap();
+    assert_eq!(review.at, stored);
+    let state = cmds.iter().find_map(|c| match c {
+        Cmd::Db(DbCmd::RecordReview { state, .. }) => Some(*state),
+        _ => None,
+    });
+    assert_eq!(Scheduler::default().fold([review]), state);
 }
