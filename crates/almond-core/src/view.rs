@@ -7,9 +7,20 @@ use crate::session::Phase;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewModel {
     Loading,
-    Home { due: u32 },
-    Review { card: CardView },
-    Done { reviewed: u32, can_undo: bool },
+    Home {
+        due: u32,
+    },
+    Review {
+        card: CardView,
+    },
+    Done {
+        reviewed: u32,
+        can_undo: bool,
+    },
+    /// Storage failed. Sending `Opened` retries.
+    Failed {
+        message: String,
+    },
 }
 
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
@@ -37,6 +48,9 @@ pub struct Intervals {
 pub fn view(model: &Model) -> ViewModel {
     match &model.screen {
         Screen::Loading => ViewModel::Loading,
+        Screen::Failed { message } => ViewModel::Failed {
+            message: message.clone(),
+        },
         Screen::Home { due } => ViewModel::Home {
             due: due.len() as u32,
         },

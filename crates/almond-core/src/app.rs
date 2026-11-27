@@ -33,6 +33,8 @@ pub enum Event {
 pub enum Msg {
     Event(Event),
     DueLoaded(Vec<Due>),
+    /// Loading the due cards failed; the message is for display.
+    LoadFailed(String),
 }
 
 impl From<Event> for Msg {
@@ -111,6 +113,10 @@ pub(crate) enum Screen {
         due: Vec<Due>,
     },
     Review(Session),
+    /// Storage failed. `Opened` retries.
+    Failed {
+        message: String,
+    },
 }
 
 impl Model {
@@ -127,6 +133,9 @@ impl Model {
 pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
     let now = env.now;
     match (msg, &mut model.screen) {
+        // Coming back to the foreground mid-review keeps the session.
+        (Msg::Event(Event::Opened), Screen::Review(_)) => vec![],
+
         (Msg::Event(Event::Opened | Event::Close), _) => {
             model.screen = Screen::Loading;
             vec![
@@ -141,6 +150,11 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
         // A newer load (say, after a card was added mid-load) replaces the list.
         (Msg::DueLoaded(due), Screen::Loading | Screen::Home { .. }) => {
             model.screen = Screen::Home { due };
+            vec![Cmd::Render]
+        }
+
+        (Msg::LoadFailed(message), Screen::Loading) => {
+            model.screen = Screen::Failed { message };
             vec![Cmd::Render]
         }
 
@@ -161,10 +175,15 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
             let mut cmds = vec![Cmd::Db(DbCmd::InsertCard(card)), Cmd::Render];
             match screen {
                 Screen::Home { due: list } => list.push(due),
-                Screen::Review(session) => session.queue.push_back(due),
+                Screen::Review(session) => {
+                    session.queue.push_back(due);
+                    if matches!(session.phase, Phase::Done) {
+                        session.show_next(now);
+                    }
+                }
                 // The load in flight may miss the new card; queue another
                 // behind the insert.
-                Screen::Loading => cmds.push(Cmd::Db(DbCmd::LoadDue {
+                Screen::Loading | Screen::Failed { .. } => cmds.push(Cmd::Db(DbCmd::LoadDue {
                     now,
                     limit: SESSION_LIMIT,
                 })),
@@ -189,7 +208,7 @@ pub fn update(model: &mut Model, msg: Msg, env: Env) -> Vec<Cmd> {
             rate(session, &model.scheduler, rating, env)
         }
 
-        (Msg::Event(Event::Undo), Screen::Review(session)) => undo(session),
+        (Msg::Event(Event::Undo), Screen::Review(session)) => undo(session, now),
 
         // Anything else is stale or out of order (a double tap, a late
         // result): ignore it rather than corrupt the flow.
@@ -244,7 +263,6 @@ fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: Env) 
     session.undo = Some(Undo {
         review: review.id,
         current,
-        shown_at,
         preview,
     });
     session.reviewed += 1;
@@ -261,7 +279,7 @@ fn rate(session: &mut Session, scheduler: &Scheduler, rating: Rating, env: Env) 
     ]
 }
 
-fn undo(session: &mut Session) -> Vec<Cmd> {
+fn undo(session: &mut Session, now: Timestamp) -> Vec<Cmd> {
     let Some(undo) = session.undo.take() else {
         return vec![];
     };
@@ -269,7 +287,8 @@ fn undo(session: &mut Session) -> Vec<Cmd> {
     // Drop the requeued copy from an Again, and put whatever is on screen
     // back at the front.
     session.queue.retain(|d| d.card.id != card);
-    if let Phase::Front { current, .. } = mem::replace(&mut session.phase, Phase::Done)
+    if let Phase::Front { current, .. } | Phase::Back { current, .. } =
+        mem::replace(&mut session.phase, Phase::Done)
         && current.card.id != card
     {
         session.queue.push_front(current);
@@ -278,7 +297,8 @@ fn undo(session: &mut Session) -> Vec<Cmd> {
     session.reviewed -= 1;
     session.phase = Phase::Back {
         current: undo.current,
-        shown_at: undo.shown_at,
+        // Time spent on other cards in between is not time spent on this one.
+        shown_at: now,
         preview: undo.preview,
     };
     vec![

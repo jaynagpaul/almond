@@ -281,3 +281,88 @@ fn revealing_twice_keeps_the_back_showing() {
     assert!(app.send(Event::Reveal).is_empty());
     assert_eq!(app.view(), shown);
 }
+
+#[test]
+fn undo_after_revealing_the_next_card_keeps_that_card_in_the_session() {
+    let mut app = App::with_cards(&[("one", "1"), ("two", "2")]);
+    app.send(Event::StartReview);
+    app.send(Event::Reveal);
+    app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    app.send(Event::Reveal); // "two" is now on its back
+    app.send(Event::Undo);
+    assert_eq!(app.card().front, "one");
+    assert_eq!(app.card().remaining, 2);
+
+    app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    assert_eq!(app.card().front, "two");
+}
+
+#[test]
+fn coming_back_to_the_foreground_keeps_the_session() {
+    let mut app = App::with_cards(&[("one", "1"), ("two", "2")]);
+    app.send(Event::StartReview);
+    app.send(Event::Reveal);
+    let shown = app.view();
+    assert!(app.send(Event::Opened).is_empty());
+    assert_eq!(app.view(), shown);
+}
+
+#[test]
+fn rerating_after_undo_times_only_the_second_look() {
+    let mut app = App::with_cards(&[("one", "1"), ("two", "2")]);
+    app.send(Event::StartReview);
+    app.send(Event::Reveal);
+    app.wait_ms(2_000);
+    app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    app.wait_ms(60_000);
+    app.send(Event::Undo);
+    app.wait_ms(1_000);
+    let cmds = app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    assert_eq!(recorded(&cmds)[0].took_ms, 1_000);
+}
+
+#[test]
+fn a_card_added_on_the_done_screen_is_shown_next() {
+    let mut app = App::with_cards(&[("one", "1")]);
+    app.send(Event::StartReview);
+    app.send(Event::Reveal);
+    app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    app.send(Event::AddCard {
+        front: "new".into(),
+        back: "card".into(),
+    });
+    assert_eq!(app.card().front, "new");
+}
+
+#[test]
+fn a_failed_load_shows_an_error_and_opening_again_retries() {
+    let mut model = Model::default();
+    let env = Env {
+        now: Timestamp::from_millis(0),
+        entropy: 0,
+    };
+    update(&mut model, Event::Opened.into(), env);
+    update(&mut model, Msg::LoadFailed("disk full".into()), env);
+    assert_eq!(
+        view(&model),
+        ViewModel::Failed {
+            message: "disk full".into()
+        }
+    );
+    let cmds = update(&mut model, Event::Opened.into(), env);
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Cmd::Db(DbCmd::LoadDue { .. })))
+    );
+    assert_eq!(view(&model), ViewModel::Loading);
+}

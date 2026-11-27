@@ -40,7 +40,6 @@ pub(crate) enum Phase {
 pub(crate) struct Undo {
     pub review: ReviewId,
     pub current: Due,
-    pub shown_at: Timestamp,
     pub preview: Preview,
 }
 

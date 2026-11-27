@@ -141,15 +141,24 @@ impl Inner {
 fn worker(mut store: Store, jobs: &Receiver<Job>, core: &Weak<Inner>) {
     for job in jobs {
         match job {
-            Job::Run(cmd) => match store.apply(cmd) {
-                Ok(Some(msg)) => match core.upgrade() {
-                    Some(core) => core.send(msg),
-                    None => return,
-                },
-                Ok(None) => {}
-                // TODO: surface storage failures in the view.
-                Err(e) => eprintln!("almond: storage command failed: {e}"),
-            },
+            Job::Run(cmd) => {
+                let is_load = matches!(cmd, DbCmd::LoadDue { .. });
+                let reply = match store.apply(cmd) {
+                    Ok(reply) => reply,
+                    Err(e) if is_load => Some(Msg::LoadFailed(e.to_string())),
+                    // TODO: surface failed writes in the view too.
+                    Err(e) => {
+                        eprintln!("almond: storage command failed: {e}");
+                        None
+                    }
+                };
+                if let Some(msg) = reply {
+                    match core.upgrade() {
+                        Some(core) => core.send(msg),
+                        None => return,
+                    }
+                }
+            }
             Job::Flush(done) => {
                 let _ = done.send(());
             }
