@@ -1,0 +1,24 @@
+[package]
+name = "almond-ffi"
+version = "0.1.0"
+description = "Almond's runtime and the UniFFI surface Swift talks to."
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "almond_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+almond-core = { workspace = true, features = ["ffi"] }
+almond-store.workspace = true
+thiserror.workspace = true
+uniffi = { workspace = true, features = ["cli"] }
+
+[lints]
+workspace = true

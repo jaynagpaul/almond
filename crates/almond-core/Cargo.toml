@@ -1,0 +1,19 @@
+[package]
+name = "almond-core"
+version = "0.1.0"
+description = "Almond's pure core: domain types, scheduling, and the Elm-style update/view."
+edition.workspace = true
+license-file.workspace = true
+rust-version.workspace = true
+
+[features]
+# Derives UniFFI traits on the types that cross into Swift. Off for pure Rust users.
+ffi = ["dep:uniffi"]
+
+[dependencies]
+fsrs.workspace = true
+ulid.workspace = true
+uniffi = { workspace = true, optional = true }
+
+[lints]
+workspace = true
