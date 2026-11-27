@@ -1,71 +1,91 @@
+use std::cmp::Ordering;
 use std::fmt;
-use std::str::FromStr;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 
 use ulid::Ulid;
 
 use crate::time::Timestamp;
 
-/// A string that is not a valid id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvalidId(pub String);
+/// A typed id: an `Id<Card>` can never be passed where an `Id<Review>` is
+/// expected, though both are the same 16 bytes underneath.
+///
+/// A ULID: sortable by creation time, and unique without coordination, so
+/// any device can mint one.
+pub struct Id<T> {
+    ulid: Ulid,
+    // `fn() -> T` keeps `Id<T>` Send, Sync and Copy whatever `T` is.
+    kind: PhantomData<fn() -> T>,
+}
 
-impl fmt::Display for InvalidId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "not a valid id: {:?}", self.0)
+/// Identifies a card.
+pub type CardId = Id<Card>;
+/// Identifies one review. Writing the same review twice is a no-op.
+pub type ReviewId = Id<Review>;
+
+impl<T> Id<T> {
+    pub fn new(at: Timestamp, entropy: u128) -> Self {
+        Self::from_ulid(Ulid::from_parts(at.as_millis() as u64, entropy))
+    }
+
+    /// 16 bytes, big-endian, so byte order matches creation order.
+    pub fn to_bytes(self) -> [u8; 16] {
+        self.ulid.to_bytes()
+    }
+
+    pub fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self::from_ulid(Ulid::from_bytes(bytes))
+    }
+
+    const fn from_ulid(ulid: Ulid) -> Self {
+        Self {
+            ulid,
+            kind: PhantomData,
+        }
     }
 }
 
-impl std::error::Error for InvalidId {}
-
-macro_rules! id {
-    ($(#[$doc:meta])* $name:ident) => {
-        $(#[$doc])*
-        ///
-        /// A ULID: sortable by creation time, and unique without coordination,
-        /// so any device can mint one.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct $name(Ulid);
-
-        impl $name {
-            pub fn new(at: Timestamp, entropy: u128) -> Self {
-                Self(Ulid::from_parts(at.as_millis() as u64, entropy))
-            }
-        }
-
-        impl $name {
-            /// 16 bytes, big-endian, so byte order matches creation order.
-            pub fn to_bytes(self) -> [u8; 16] {
-                self.0.to_bytes()
-            }
-
-            pub fn from_bytes(bytes: [u8; 16]) -> Self {
-                Self(Ulid::from_bytes(bytes))
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-
-        impl FromStr for $name {
-            type Err = InvalidId;
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ulid::from_string(s).map(Self).map_err(|_| InvalidId(s.to_owned()))
-            }
-        }
-    };
+// Written by hand because `#[derive]` would demand `T: Clone`, `T: Eq`, and
+// so on, which `Card` and `Review` need not be.
+impl<T> Clone for Id<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
-id!(
-    /// Identifies a card.
-    CardId
-);
-id!(
-    /// Identifies one review. Writing the same review twice is a no-op.
-    ReviewId
-);
+impl<T> Copy for Id<T> {}
+
+impl<T> PartialEq for Id<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.ulid == other.ulid
+    }
+}
+
+impl<T> Eq for Id<T> {}
+
+impl<T> PartialOrd for Id<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Ord for Id<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ulid.cmp(&other.ulid)
+    }
+}
+
+impl<T> Hash for Id<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.ulid.hash(state);
+    }
+}
+
+impl<T> fmt::Debug for Id<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Id({})", self.ulid)
+    }
+}
 
 /// A two-sided card. Notes, reverse cards and cloze can come later: reviews
 /// only reference [`CardId`], so adding them does not touch the log.

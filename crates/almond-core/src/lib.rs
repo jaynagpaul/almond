@@ -16,7 +16,7 @@ mod session;
 mod time;
 
 pub use app::{Cmd, DbCmd, Env, Event, Haptic, Model, Msg, PlatformCmd, update};
-pub use card::{Card, CardId, InvalidId, Rating, Review, ReviewId};
+pub use card::{Card, CardId, Id, Rating, Review, ReviewId};
 pub use schedule::{CardState, MemoryState, Preview, ScheduleError, Scheduler};
 pub use session::Due;
 pub use time::Timestamp;
