@@ -92,7 +92,8 @@ fn opening_loads_cards_due_by_the_end_of_the_local_day_then_shows_home() {
     let cmds = update(&mut model, Event::Opened.into(), &env);
     assert_eq!(view(&model), ViewModel::Loading);
     assert!(cmds.contains(&Cmd::Db(DbCmd::LoadDue {
-        due_by: "2026-11-27T22:30:00Z".parse().unwrap(),
+        now: env.now,
+        day_end: "2026-11-27T22:30:00Z".parse().unwrap(),
         limit: 500
     })));
 
@@ -375,4 +376,23 @@ fn a_failed_load_shows_an_error_and_opening_again_retries() {
             .any(|c| matches!(c, Cmd::Db(DbCmd::LoadDue { .. })))
     );
     assert_eq!(view(&model), ViewModel::Loading);
+}
+
+#[test]
+fn review_times_are_kept_to_the_millisecond_the_log_stores() {
+    let mut app = App::with_cards(&[("q", "a")]);
+    app.now = "2026-11-27T12:00:00.123456789Z".parse().unwrap();
+    app.send(Event::StartReview);
+    app.send(Event::Reveal);
+    let cmds = app.send(Event::Rate {
+        rating: Rating::Good,
+    });
+    let review = recorded(&cmds)[0];
+    let stored: Timestamp = "2026-11-27T12:00:00.123Z".parse().unwrap();
+    assert_eq!(review.at, stored);
+    let state = cmds.iter().find_map(|c| match c {
+        Cmd::Db(DbCmd::RecordReview { state, .. }) => Some(*state),
+        _ => None,
+    });
+    assert_eq!(Scheduler::default().fold([review]), state);
 }

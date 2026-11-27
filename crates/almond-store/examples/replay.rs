@@ -69,10 +69,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let t = Instant::now();
-    let due = store.due(
-        Timestamp::from_millisecond(start.as_millisecond() + 400 * DAY)?,
-        500,
-    )?;
+    let late = Timestamp::from_millisecond(start.as_millisecond() + 400 * DAY)?;
+    let due = store.due(late, late, 500)?;
     println!("load {} due cards: {:.2?}", due.len(), t.elapsed());
 
     let t = Instant::now();

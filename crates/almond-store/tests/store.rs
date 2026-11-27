@@ -48,7 +48,8 @@ fn review(
 fn due_fronts(store: &mut Store, day: i64) -> Vec<String> {
     match store
         .apply(DbCmd::LoadDue {
-            due_by: at(day),
+            now: at(day),
+            day_end: at(day),
             limit: 100,
         })
         .unwrap()
@@ -178,4 +179,33 @@ fn reopening_a_database_keeps_its_data() {
     let mut store = Store::open(&path).unwrap();
     assert_eq!(due_fronts(&mut store, 0), ["kept"]);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn long_intervals_are_due_all_day_but_short_steps_wait_their_turn() {
+    let s = Scheduler::default();
+    let mut store = Store::open_in_memory().unwrap();
+    let hard = new_card(&mut store, 1, "hard");
+    review(&mut store, &s, hard, 0, Rating::Hard, 1);
+    let good = new_card(&mut store, 2, "good");
+    review(&mut store, &s, good, 0, Rating::Good, 2);
+
+    let hard_due = store.state(hard).unwrap().unwrap().due;
+    let good_due = store.state(good).unwrap().unwrap().due;
+    assert!(hard_due < at(1), "Hard on a new card is a sub-day step");
+    assert!(good_due > at(1), "Good on a new card is days away");
+
+    // Just before each is due, with the study day ending after both.
+    let day_end = Timestamp::from_millisecond(good_due.as_millisecond() + DAY).unwrap();
+    let before_hard = Timestamp::from_millisecond(hard_due.as_millisecond() - 1).unwrap();
+    let fronts = |store: &Store, now| -> Vec<String> {
+        store
+            .due(now, day_end, 100)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.card.front)
+            .collect()
+    };
+    assert_eq!(fronts(&store, before_hard), ["good"]);
+    assert_eq!(fronts(&store, hard_due), ["hard", "good"]);
 }

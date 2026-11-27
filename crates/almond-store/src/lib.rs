@@ -83,7 +83,11 @@ impl Store {
     /// On any SQLite failure.
     pub fn apply(&mut self, cmd: DbCmd) -> Result<Option<Msg>, Error> {
         match cmd {
-            DbCmd::LoadDue { due_by, limit } => Ok(Some(Msg::DueLoaded(self.due(due_by, limit)?))),
+            DbCmd::LoadDue {
+                now,
+                day_end,
+                limit,
+            } => Ok(Some(Msg::DueLoaded(self.due(now, day_end, limit)?))),
             DbCmd::InsertCard(card) => {
                 self.conn.execute(
                     "INSERT OR IGNORE INTO cards (id, front, back) VALUES (?1, ?2, ?3)",
@@ -137,32 +141,37 @@ impl Store {
         }
     }
 
-    /// Cards due before `due_by`, most overdue first, then new cards oldest first.
+    /// Cards due by `now`, and cards with intervals of a day or more due before
+    /// `day_end`; most overdue first, then new cards oldest first.
     ///
     /// # Errors
     /// On any SQLite failure.
-    pub fn due(&self, due_by: Timestamp, limit: u32) -> Result<Vec<Due>, Error> {
+    pub fn due(&self, now: Timestamp, day_end: Timestamp, limit: u32) -> Result<Vec<Due>, Error> {
         let mut out = Vec::new();
         let mut reviewed = self.conn.prepare_cached(
             "SELECT c.id, c.front, c.back,
                     s.stability, s.difficulty, s.stability_fast, s.last_review, s.due
              FROM card_state s JOIN cards c ON c.id = s.card
-             WHERE s.due < ?1 ORDER BY s.due LIMIT ?2",
+             WHERE s.due <= ?1 OR (s.due < ?2 AND s.due - s.last_review >= 86400000)
+             ORDER BY s.due LIMIT ?3",
         )?;
-        for due in reviewed.query_map(params![due_by.as_millisecond(), limit], |r| {
-            Ok(Due {
-                card: card(r)?,
-                state: Some(CardState {
-                    memory: MemoryState {
-                        stability: r.get(3)?,
-                        difficulty: r.get(4)?,
-                        stability_fast: r.get(5)?,
-                    },
-                    last_review: ts(r, 6)?,
-                    due: ts(r, 7)?,
-                }),
-            })
-        })? {
+        for due in reviewed.query_map(
+            params![now.as_millisecond(), day_end.as_millisecond(), limit],
+            |r| {
+                Ok(Due {
+                    card: card(r)?,
+                    state: Some(CardState {
+                        memory: MemoryState {
+                            stability: r.get(3)?,
+                            difficulty: r.get(4)?,
+                            stability_fast: r.get(5)?,
+                        },
+                        last_review: ts(r, 6)?,
+                        due: ts(r, 7)?,
+                    }),
+                })
+            },
+        )? {
             out.push(due?);
         }
         let room = limit.saturating_sub(out.len() as u32);

@@ -118,10 +118,10 @@ fn a_card_added_while_loading_still_shows_up() {
 }
 
 #[test]
-fn an_unknown_time_zone_is_an_error() {
+fn an_unknown_time_zone_falls_back_instead_of_blocking_launch() {
     let db = temp_db("tz");
-    assert!(Core::new(&db, "Mars/Olympus_Mons", Arc::new(FakeShell::default())).is_err());
-    let core = Core::new(&db, "UTC", Arc::new(FakeShell::default())).unwrap();
-    assert!(core.set_time_zone("Nowhere/Nope").is_err());
-    assert!(core.set_time_zone("Europe/Paris").is_ok());
+    let core = Core::new(&db, "Mars/Olympus_Mons", Arc::new(FakeShell::default())).unwrap();
+    core.flush();
+    assert_eq!(core.view(), ViewModel::Home { due: 0 });
+    core.set_time_zone("Europe/Paris");
 }

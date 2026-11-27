@@ -15,11 +15,18 @@ pub(crate) fn days_between(later: Timestamp, earlier: Timestamp) -> f32 {
     (later.duration_since(earlier).as_secs_f64() / SECS_PER_DAY).max(0.0) as f32
 }
 
+/// `at` plus `days`, saturating at the end of time rather than panicking on
+/// a huge or non-finite interval.
 pub(crate) fn plus_days(at: Timestamp, days: f32) -> Timestamp {
-    at.saturating_add(SignedDuration::from_secs_f64(
-        f64::from(days) * SECS_PER_DAY,
-    ))
-    .expect("saturating addition of a SignedDuration cannot fail")
+    SignedDuration::try_from_secs_f64(f64::from(days) * SECS_PER_DAY)
+        .ok()
+        .and_then(|d| at.saturating_add(d).ok())
+        .unwrap_or(Timestamp::MAX)
+}
+
+/// Truncates to whole milliseconds, the precision the log stores.
+pub(crate) fn to_millis(at: Timestamp) -> Timestamp {
+    Timestamp::from_millisecond(at.as_millisecond()).unwrap_or(at)
 }
 
 /// Milliseconds from `earlier` to `later`, clamped to `0..=u32::MAX`.
@@ -35,16 +42,19 @@ pub(crate) fn millis_between(later: Timestamp, earlier: Timestamp) -> u32 {
 pub fn end_of_day(now: Timestamp, tz: &TimeZone) -> Timestamp {
     let local = now.to_zoned_datetime(tz.clone());
     let today = local.date();
+    // Only fails at the edges of representable time; a day from now is then
+    // the closest sensible answer.
+    let fallback = plus_days(now, 1.0);
     let rollover = |date: jiff::civil::Date| {
         date.to_datetime(DAY_STARTS_AT)
             .to_zoned_datetime(tz.clone())
-            .map_or(now, |z| z.timestamp())
+            .map_or(fallback, |z| z.timestamp())
     };
     let start_of_next = rollover(today);
     if start_of_next > now {
         start_of_next
     } else {
-        today.tomorrow().map_or(now, rollover)
+        today.tomorrow().map_or(fallback, rollover)
     }
 }
 
@@ -88,5 +98,8 @@ mod tests {
         assert_eq!(days_between(plus_days(a, 1.5), a), 1.5);
         assert_eq!(days_between(a, plus_days(a, 1.0)), 0.0);
         assert_eq!(millis_between(plus_days(a, 1.0), a), 86_400_000);
+        assert_eq!(plus_days(a, f32::INFINITY), Timestamp::MAX);
+        assert_eq!(plus_days(a, f32::NAN), Timestamp::MAX);
+        assert_eq!(plus_days(a, f32::MAX), Timestamp::MAX);
     }
 }

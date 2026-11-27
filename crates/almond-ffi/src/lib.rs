@@ -31,8 +31,6 @@ pub trait Shell: Send + Sync {
 pub enum CoreError {
     #[error("could not open the database: {message}")]
     Storage { message: String },
-    #[error("unknown time zone {name:?}")]
-    UnknownTimeZone { name: String },
 }
 
 #[derive(uniffi::Object)]
@@ -61,14 +59,14 @@ impl Core {
     /// (`TimeZone.current.identifier` in Swift).
     ///
     /// # Errors
-    /// If the database cannot be opened or the time zone is unknown.
+    /// If the database cannot be opened. An unknown time zone falls back to UTC.
     #[uniffi::constructor]
     pub fn new(
         db_path: &str,
         time_zone: &str,
         shell: Arc<dyn Shell>,
     ) -> Result<Arc<Self>, CoreError> {
-        let tz = time_zone_named(time_zone)?;
+        let tz = time_zone_named(time_zone);
         let store = Store::open(db_path).map_err(|e| CoreError::Storage {
             message: e.to_string(),
         })?;
@@ -101,18 +99,16 @@ impl Core {
         view(&self.inner.model())
     }
 
-    /// Call when the system time zone changes, then send `Opened` to reload.
-    ///
-    /// # Errors
-    /// If the time zone is unknown; the previous one stays in effect.
-    pub fn set_time_zone(&self, time_zone: &str) -> Result<(), CoreError> {
-        let tz = time_zone_named(time_zone)?;
+    /// Call when the system time zone changes. It applies from the next load
+    /// of due cards: sending `Opened` from Home reloads now, while a review
+    /// session in progress keeps its cards until it closes.
+    pub fn set_time_zone(&self, time_zone: &str) {
+        let tz = time_zone_named(time_zone);
         *self
             .inner
             .tz
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = tz;
-        Ok(())
     }
 }
 
@@ -195,8 +191,11 @@ fn worker(mut store: Store, jobs: &Receiver<Job>, core: &Weak<Inner>) {
     }
 }
 
-fn time_zone_named(name: &str) -> Result<TimeZone, CoreError> {
-    TimeZone::get(name).map_err(|_| CoreError::UnknownTimeZone {
-        name: name.to_owned(),
+/// Never fails: a zone missing from the bundled database (newer than it, or
+/// a custom name) must not stop the app from opening.
+fn time_zone_named(name: &str) -> TimeZone {
+    TimeZone::get(name).unwrap_or_else(|e| {
+        eprintln!("almond: unknown time zone {name:?} ({e}); using UTC");
+        TimeZone::UTC
     })
 }
