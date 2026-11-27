@@ -21,7 +21,7 @@ cargo test --workspace
 
 ## Principles
 
-These come from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by Lauren Tan (MIT), chosen and condensed for this codebase. The full text of each is a `principle-*` skill in the pstack plugin, which `.claude/settings.json` enables for this repo.
+These come from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by Lauren Tan (MIT), chosen and condensed for this codebase.
 
 **Model the domain.** Encode rules in types, not in scattered conditionals. A review session is a state machine, so a card cannot be rated before it is revealed. Reach for an enum before a second boolean that has to stay in sync with the first.
 
